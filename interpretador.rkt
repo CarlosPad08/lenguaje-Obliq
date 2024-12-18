@@ -1,17 +1,11 @@
 #lang racket
+(require racket/list)
 
 ;; ============================
 ;; Obliq Interpreter - Starter
 ;; ============================
 
-;; Este es un esquema inicial para implementar un intérprete para el lenguaje Obliq en Racket.
-;; Proporciona las bases para trabajar en el análisis sintáctico, la evaluación de expresiones y el manejo de ambientes.
-
-;; ----------------------------
 ;; Representación de Ambientes
-;; ----------------------------
-
-;; Un ambiente es una lista de asociaciones (variable . valor).
 (define empty-env '())
 
 ;; Buscar una variable en el ambiente.
@@ -30,118 +24,110 @@
         [(eq? (car (car env)) var) (cons (cons var val) (cdr env))]
         [else (cons (car env) (update-env var val (cdr env)))]))
 
-;; ----------------------------
-;; Representación de Expresiones
-;; ----------------------------
+;; ============================
+;; Evaluación de Expresiones
+;; ============================
 
-;; Las expresiones se representan como estructuras.
-(struct num (value))
-(struct var (name))
-(struct add (left right))
-(struct sub (left right))
-(struct mul (left right))
-(struct div (left right))
-(struct if (cond then else))
-(struct bool (value))
-(struct equal (left right)) ; Cambiado de eq a equal
-(struct lt (left right))
-(struct gt (left right))
-(struct concat (left right))
-(struct proc (params body))
-(struct call (proc args))
-(struct seq (exprs))
-
-;; ----------------------------
-;; Evaluador de Expresiones (corregido)
-;; ----------------------------
-
+;; Función principal de evaluación
 (define (eval-exp exp env)
-  (cond
-    ;; Primitivas numéricas
-    [(num? exp) (num-value exp)]
-    ;; Variables
-    [(var? exp) (lookup (var-name exp) env)]
-    ;; Aritmética
-    [(add? exp)
-     (+ (eval-exp (add-left exp) env)
-        (eval-exp (add-right exp) env))]
-    [(sub? exp)
-     (- (eval-exp (sub-left exp) env)
-        (eval-exp (sub-right exp) env))]
-    [(mul? exp)
-     (* (eval-exp (mul-left exp) env)
-        (eval-exp (mul-right exp) env))]
-    [(div? exp)
-     (/ (eval-exp (div-left exp) env)
-        (eval-exp (div-right exp) env))]
-    ;; Expresiones booleanas
-    [(bool? exp) (bool-value exp)]
-    [(equal? exp)
-     (= (eval-exp (equal-left exp) env)
-        (eval-exp (equal-right exp) env))]
-    [(lt? exp)
-     (< (eval-exp (lt-left exp) env)
-        (eval-exp (lt-right exp) env))]
-    [(gt? exp)
-     (> (eval-exp (gt-left exp) env)
-        (eval-exp (gt-right exp) env))]
+  (cond 
+    ;; Constantes numéricas
+    [(number? exp) exp]
+
+    ;; Operaciones aritméticas
+    [(and (list? exp) (member (car exp) '(+ - * %)))
+     (let ([args (map (lambda (e) (eval-exp e env)) (cdr exp))])
+       (case (car exp)
+         [(+) (apply + args)]
+         [(-) (apply - args)]
+         [(*) (apply * args)]
+         [(%) (apply modulo args)]))]
+
+    ;; Operaciones relacionales
+    [(and (list? exp) (member (car exp) '(< <= > >= is)))
+     (let ([args (map (lambda (e) (eval-exp e env)) (cdr exp))])
+       (case (car exp)
+         [(<) (< (car args) (cadr args))]
+         [(<=) (<= (car args) (cadr args))]
+         [(>) (> (car args) (cadr args))]
+         [(>=) (>= (car args) (cadr args))]
+         [(is) (equal? (car args) (cadr args))]))]
+
     ;; Condicionales
-    [(if? exp)
-     (if (eval-exp (if-cond exp) env)
-         (eval-exp (if-then exp) env)
-         (eval-exp (if-else exp) env))]
-    ;; Operaciones de cadenas
-    [(concat? exp)
-     (string-append (number->string (eval-exp (concat-left exp) env))
-                    (number->string (eval-exp (concat-right exp) env)))]
-    ;; Procedimientos
-    [(proc? exp)
-     (lambda args
-       (let ([new-env (foldl (lambda (param-arg env)
-                               (extend-env (car param-arg) (cdr param-arg) env))
-                             env
-                             (map cons (proc-params exp) args))])
-         (eval-exp (proc-body exp) new-env)))]
-    [(call? exp)
-     (apply (eval-exp (call-proc exp) env)
-            (map (lambda (arg) (eval-exp arg env))
-                 (call-args exp)))]
-    ;; Secuencias
-    [(seq? exp)
-     (foldl (lambda (e _) (eval-exp e env))
-            #f
-            (seq-exprs exp))]
-    [else (error "Expresión desconocida" exp)]))
+    [(and (list? exp) (equal? (car exp) 'if))
+     (let ([cond (eval-exp (cadr exp) env)])
+       (if cond
+           (eval-exp (caddr exp) env)
+           (eval-exp (cadddr exp) env)))]
 
-;; ----------------------------
-;; Programa de Prueba
-;; ----------------------------
+    ;; Ciclo for
+    [(and (list? exp) (equal? (car exp) 'for))
+     (let loop ([i (eval-exp (caddr exp) env)]
+                [end (eval-exp (cadddr exp) env)]
+                [env env])
+       (if (> i end)
+           'ok
+           (begin
+             (eval-exp (car (cddddr exp)) (extend-env (cadr exp) i env))
+             (loop (+ i 1) end env))))]
 
-;; Ambiente inicial
-(define test-env (extend-env 'x 10 empty-env))
+    ;; Definición de procedimientos
+    [(and (list? exp) (equal? (car exp) 'proc))
+     (let ([params (cadr exp)]
+           [body (caddr exp)])
+       (lambda args
+         (if (not (= (length params) (length args)))
+             (error "Número incorrecto de argumentos" params args)
+             (let ([new-env (foldr (lambda (param-val env)
+                                     (extend-env (car param-val) (cdr param-val) env))
+                                   env
+                                   (map cons params args))])
+               (eval-exp body new-env)))))]
 
-;; Prueba de primitivas numéricas
-(define test-num (add (num 5) (var 'x))) ; Resultado esperado: 15
+    ;; Aplicación de procedimientos
+    [(and (list? exp) (equal? (car exp) 'apply))
+     (let ([proc (eval-exp (cadr exp) env)]
+           [args (map (lambda (e) (eval-exp e env)) (caddr exp))])
+       (apply proc args))]
 
-;; Prueba de cadenas
-(define test-str (concat (num 5) (num 3))) ; Resultado esperado: "53"
+    ;; Definición de una variable
+    [(and (list? exp) (equal? (car exp) 'define))
+     (let ([var (cadr exp)]
+           [val (eval-exp (caddr exp) env)])
+       (extend-env var val env))]
 
-;; Prueba de expresiones booleanas
-(define test-bool (if (lt (num 3) (num 5)) (num 1) (num 0))) ; Resultado esperado: 1
+    ;; Manejo de errores y excepciones
+    [(and (list? exp) (equal? (car exp) 'try))
+     (let ([try-block (cadr exp)]
+           [catch-block (caddr exp)])
+       (with-handlers ([exn:fail? (lambda (_) (eval-exp catch-block env))])
+         (eval-exp try-block env)))]
 
-;; Prueba de igualdad
-(define test-equal (if (equal (num 3) (num 3)) (num 1) (num 0))) ; Resultado esperado: 1
+    ;; Variable
+    [(symbol? exp) (lookup exp env)]
 
-;; Prueba de procedimientos
-(define test-proc (call (proc '(a b) (add (var 'a) (var 'b))) (list (num 5) (num 10)))) ; Resultado esperado: 15
+    ;; Error por expresión no reconocida
+    [else (error "Expresión no reconocida" exp)]))
 
-;; Prueba de secuencias
-(define test-seq (seq (list (add (num 5) (num 5)) (mul (num 2) (num 3))))) ; Resultado esperado: 6
+;; ============================
+;; Pruebas Iniciales
+;; ============================
 
-;; Ejecutar pruebas
-(eval-exp test-num test-env)
-(eval-exp test-str test-env)
-(eval-exp test-bool test-env)
-(eval-exp test-equal test-env)
-(eval-exp test-proc test-env)
-(eval-exp test-seq test-env)
+;; Ambiente inicial con algunas variables
+(define initial-env (extend-env 'x 10 (extend-env 'y 20 empty-env)))
+
+;; Pruebas
+(eval-exp 42 initial-env)             ;; Constante numérica
+(eval-exp '(+ 1 2 3) initial-env)     ;; Suma
+(eval-exp '(* 2 5) initial-env)       ;; Multiplicación
+(eval-exp '(< 3 5) initial-env)       ;; Comparación menor que
+(eval-exp '(is x 10) initial-env)     ;; Comparación de igualdad con variable
+(eval-exp '(if (< x y) x y) initial-env) ;; Condicional: debería devolver 10
+(eval-exp '(for i 1 3 (+ i 1)) initial-env) ;; Ciclo for: debería evaluar las expresiones con i=1,2,3
+
+;; Definición y uso de procedimientos
+(define extended-env (eval-exp '(define my-proc (proc (a b) (+ a b))) initial-env))
+(eval-exp '(apply my-proc (3 4)) extended-env) ;; Debería devolver 7
+
+;; Manejo de errores
+;; (eval-exp '(try (/ 1 0) "Error capturado") initial-env) ;; Debería devolver "Error capturado"
