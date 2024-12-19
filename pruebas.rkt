@@ -1,5 +1,15 @@
 #lang racket
 
+;; ============================
+
+;; Integrantes del equipo:
+
+;; JUAN CAMILO GUTIERREZ VIVEROS - 2159874
+;; CARLOS FERNANDO PADILLA MESA – 2059962
+;; ANDRÉS FELIPE ROJAS – 2160328
+
+;; ============================
+
 (require "interpretador.rkt")
 
 ;; ============================
