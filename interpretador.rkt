@@ -11,10 +11,6 @@
 
 ;; ============================
 
-;; ============================
-;; Obliq Interpreter - Starter
-;; ============================
-
 (provide empty-env lookup extend-env update-env eval-exp)
 
 ;; Representación de Ambientes
