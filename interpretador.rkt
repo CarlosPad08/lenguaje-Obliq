@@ -103,6 +103,38 @@
        (with-handlers ([exn:fail? (lambda (_) (eval-exp catch-block env))])
          (eval-exp try-block env)))]
 
+    ;; Manejo de objetos
+    [(and (list? exp) (equal? (car exp) 'object))
+     (let ([fields (map (lambda (pair)
+                          (let* ([key (car pair)]
+                                 [val (cdr pair)]
+                                 [evaluated-val (if (and (list? val) (equal? (car val) 'proc))
+                                                    (eval-exp val env)
+                                                    (eval-exp val env))]
+                                 [normalized-pair (if (equal? key '=>) (cons (cadr pair) (caddr pair)) pair)])
+                            (cons (car normalized-pair) evaluated-val)))
+                        (cdr exp))])
+       (lambda (msg . args)
+         (case msg
+           [(get) (let ([field (car args)])
+                   (if (assoc field fields)
+                       (cdr (assoc field fields))
+                       (error "Campo no encontrado" field)))]
+           [(update) (let ([field (car args)] [new-val (cadr args)])
+                      (if (assoc field fields)
+                          (set! fields (map (lambda (pair)
+                                              (if (eq? (car pair) field)
+                                                  (cons (car pair) new-val)
+                                                  pair))
+                                            fields))
+                          (error "Campo no encontrado para actualizar" field))
+                      new-val)]
+           [(send) (let ([method-name (car args)] [method-args (cdr args)])
+                    (if (assoc method-name fields)
+                        (apply (cdr (assoc method-name fields)) method-args)
+                        (error "Método no encontrado" method-name)))]
+           [else (error "Operación no válida en el objeto" msg)])))]
+
     ;; Variable
     [(symbol? exp) (lookup exp env)]
 
@@ -117,6 +149,9 @@
 (define initial-env (extend-env 'x 10 (extend-env 'y 20 empty-env)))
 
 ;; Pruebas
+(display "Inicio de las pruebas iniciales")
+(display "\n")
+
 (eval-exp 42 initial-env)             ;; Constante numérica
 (eval-exp '(+ 1 2 3) initial-env)     ;; Suma
 (eval-exp '(* 2 5) initial-env)       ;; Multiplicación
@@ -124,10 +159,40 @@
 (eval-exp '(is x 10) initial-env)     ;; Comparación de igualdad con variable
 (eval-exp '(if (< x y) x y) initial-env) ;; Condicional: debería devolver 10
 (eval-exp '(for i 1 3 (+ i 1)) initial-env) ;; Ciclo for: debería evaluar las expresiones con i=1,2,3
+(display "Fin de las pruebas iniciales")
+(display "\n")
+(display "----------------------------------------------------------------------------------------------")
+(display "\n")
 
 ;; Definición y uso de procedimientos
+(display "Definicion y uso de procedimientos")
+(display "\n")
+
 (define extended-env (eval-exp '(define my-proc (proc (a b) (+ a b))) initial-env))
 (eval-exp '(apply my-proc (3 4)) extended-env) ;; Debería devolver 7
 
+(display "Fin definicion y uso de procedimientos")
+(display "\n")
+(display "----------------------------------------------------------------------------------------------")
+(display "\n")
+
 ;; Manejo de errores
 ;; (eval-exp '(try (/ 1 0) "Error capturado") initial-env) ;; Debería devolver "Error capturado"
+
+;; ============================
+;; Pruebas de Objetos
+;; ============================
+
+(display "Inicio de manejo de objetos")
+(display "\n")
+
+(define obj (eval-exp '(object (x . 10) (y . 20) (add . (proc (a b) (+ a b)))) empty-env))
+
+;; Acceso a campos
+(obj 'get 'x) ;; Debería devolver 10
+
+;; Actualización de campos
+(obj 'update 'x 64)
+
+;; Invocación de métodos
+(obj 'send 'add 3 4) ;; Debería devolver 7
